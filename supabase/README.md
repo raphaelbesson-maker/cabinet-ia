@@ -1,11 +1,17 @@
 # Supabase
 
-Ce dossier contient :
+# Supabase — Architecture data du cabinet IA
 
-- `schema.sql` : structure de la base
-- `migrations/` : évolutions successives
-- éventuels scripts SQL utilitaires
+Ce dossier contient la **définition de la base**, pas les données.
 
-Objectif : pouvoir recréer l’architecture de la base facilement.
+## Structure
 
-⚠️ Jamais de données clients ici.
+- `schema.sql` : état complet de la base (référence)
+- `migrations/` : historique des évolutions
+- scripts utilitaires : vues, fonctions SQL, policies, etc.
+
+## Règles
+
+- jamais de dump complet de base
+- jamais de données clients
+- tout changement doit passer par une migration
