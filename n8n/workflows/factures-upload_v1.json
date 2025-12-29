@@ -1,0 +1,1280 @@
+{
+  "name": "IXINA - V2 - Invoice classifier & uploader (DeepSeek + OCR)",
+  "nodes": [
+    {
+      "parameters": {
+        "jsCode": "let results = [];\nfor (const item of $input.all()) {\n  for (const key of Object.keys(item.binary || {})) {\n    results.push({ json: {}, binary: { data: item.binary[key] } });\n  }\n}\nreturn results;"
+      },
+      "id": "2487323f-e9fb-453d-90a5-6a3d846f63c3",
+      "name": "Iterate attachments",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        -752,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "string": [
+            {
+              "value1": "={{ $binary.data.fileExtension }}",
+              "value2": "pdf"
+            }
+          ]
+        }
+      },
+      "id": "88eb5907-2bfd-4697-baea-4c8afed3f5b9",
+      "name": "Is PDF?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        -528,
+        16
+      ]
+    },
+    {
+      "parameters": {},
+      "id": "a4af3c6f-1ba6-45a1-b57a-0960c2f954bf",
+      "name": "Read PDF",
+      "type": "n8n-nodes-base.readPDF",
+      "typeVersion": 1,
+      "position": [
+        944,
+        -112
+      ],
+      "onError": "continueErrorOutput"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function extractJsonString(raw) {\n  if (typeof raw !== 'string') return null;\n\n  let s = raw.trim();\n\n  // Remove ```json or ``` fences if present\n  s = s.replace(/^```(?:json)?/i, '').replace(/```$/i, '').trim();\n\n  // Extract first JSON object\n  const start = s.indexOf('{');\n  const end = s.lastIndexOf('}');\n  if (start === -1 || end === -1 || end <= start) return null;\n\n  return s.slice(start, end + 1);\n}\n\ntry {\n  const raw = $json.output;\n\n  const jsonStr = extractJsonString(raw);\n  if (!jsonStr) throw new Error('No JSON object found');\n\n  const parsed = JSON.parse(jsonStr);\n\n  if (typeof parsed !== 'object' || parsed === null || Array.isArray(parsed)) {\n    throw new Error('Parsed JSON is not an object');\n  }\n\n  // Normalisation défensive (aucune invention)\n  const isInvoice = parsed.is_invoice === true;\n\n  return {\n    json: {\n      is_invoice: isInvoice,\n      confidence: typeof parsed.confidence === 'number' ? parsed.confidence : 0,\n\n      fournisseur: parsed.fournisseur ?? null,\n      numero_facture: parsed.numero_facture ?? null,\n      date_facture: parsed.date_facture ?? null,\n      contremarque: parsed.contremarque ?? null,\n\n      montant_ht: typeof parsed.montant_ht === 'number' ? parsed.montant_ht : null,\n      montant_ttc: typeof parsed.montant_ttc === 'number' ? parsed.montant_ttc : null,\n      montant_du: typeof parsed.montant_du === 'number' ? parsed.montant_du : null,\n\n      echeance_paiement: parsed.echeance_paiement ?? null,\n\n      reason_if_not_invoice: isInvoice ? null : (parsed.reason_if_not_invoice ?? 'Not an invoice')\n    },\n    binary: $binary\n  };\n\n} catch (e) {\n  return {\n    json: {\n      is_invoice: false,\n      confidence: 0,\n\n      fournisseur: null,\n      numero_facture: null,\n      date_facture: null,\n      contremarque: null,\n\n      montant_ht: null,\n      montant_ttc: null,\n      montant_du: null,\n\n      echeance_paiement: null,\n\n      reason_if_not_invoice: `Parse error: ${e.message}`\n    },\n    binary: $binary\n  };\n}"
+      },
+      "id": "1f34abf4-3b78-4f3f-9620-78f0f8038e27",
+      "name": "Parse DeepSeek JSON",
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 1,
+      "position": [
+        720,
+        144
+      ]
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "boolean": [
+            {
+              "value1": "={{ $json.is_invoice === true && $json.confidence >= 0.75 }}",
+              "value2": true
+            }
+          ]
+        }
+      },
+      "id": "c766083e-c3ea-4134-bb6f-6ffa23b9048f",
+      "name": "Is invoice?",
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 1,
+      "position": [
+        1616,
+        16
+      ]
+    },
+    {
+      "parameters": {
+        "binaryData": true,
+        "name": "={{\n  (() => {\n    const date = $json.date_facture || 'NO_DATE';\n\n    const supplierRaw = $json.fournisseur || 'NO_SUPPLIER';\n    const supplierClean = supplierRaw\n      .replace(/[^a-zA-Z]/g, '')\n      .slice(0, 8) || 'SUPPL';\n\n    return `${date}_${supplierClean}.pdf`\n      .replace(/[\\/\\\\?%*:|\"<>]/g, '-')\n      .replace(/\\s+/g, ' ')\n      .trim();\n  })()\n}}",
+        "parents": [
+          "1Dc_r7GoGKjMBRjWDG0I2AFwcf8pg3UOx"
+        ],
+        "options": {}
+      },
+      "id": "7dcdd68f-8852-4a80-92d7-5f90a182f9aa",
+      "name": "Upload to Factures",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 2,
+      "position": [
+        1840,
+        -656
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "m3yaK2l40EEbHSUp",
+          "name": "Ixina_J_M"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "getAll",
+        "returnAll": true,
+        "simple": false,
+        "filters": {
+          "labelIds": [
+            "Label_8823808780425048840"
+          ]
+        },
+        "options": {
+          "dataPropertyAttachmentsPrefixName": "attachment_",
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.gmail",
+      "typeVersion": 2.1,
+      "position": [
+        -976,
+        -80
+      ],
+      "id": "9a9dbb22-61fc-4bad-abde-d839f593761f",
+      "name": "Get many messages",
+      "webhookId": "7f24f14c-6238-4ecd-90b0-8d594f0d8a8c",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "4FgqCjr4Asbq6igs",
+          "name": "IXINA-J-M"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        1392,
+        16
+      ],
+      "id": "03f13ec2-5a24-4daf-b249-1867c97e210a",
+      "name": "Merge1"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        1168,
+        -112
+      ],
+      "id": "8983d8a1-fefa-4e0c-a5d7-3015819abeae",
+      "name": "No Operation, do nothing"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1l3q_ALJp_StqfrHufU3w0mhIJ3uwSApwGuh8YXYu_Sc",
+          "mode": "list",
+          "cachedResultName": "Factures marchandes",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1l3q_ALJp_StqfrHufU3w0mhIJ3uwSApwGuh8YXYu_Sc/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Sheet1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1l3q_ALJp_StqfrHufU3w0mhIJ3uwSApwGuh8YXYu_Sc/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Fournisseur": "={{ $json.fournisseur }}",
+            "# Facture": "={{ $json.numero_facture }}",
+            "Date facture": "={{ $json.date_facture }}",
+            "Contremarque": "={{ $json.contremarque }}",
+            "Montant HT": "={{ $json.montant_ht }}",
+            "Montant TTC": "={{ $json.montant_ttc }}",
+            "Montant du ": "={{ $json.montant_du }}",
+            "Echéance paiement": "={{ $json.echeance_paiement }}",
+            "Lien document": "={{ $json.drive_view_url }}"
+          },
+          "matchingColumns": [
+            "id"
+          ],
+          "schema": [
+            {
+              "id": "Fournisseur",
+              "displayName": "Fournisseur",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "# Facture",
+              "displayName": "# Facture",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Date facture",
+              "displayName": "Date facture",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Contremarque",
+              "displayName": "Contremarque",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Montant HT",
+              "displayName": "Montant HT",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Montant TTC",
+              "displayName": "Montant TTC",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Montant du ",
+              "displayName": "Montant du ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Echéance paiement",
+              "displayName": "Echéance paiement",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Lien document",
+              "displayName": "Lien document",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "d85f5e44-55ee-4c95-b17c-a71cedad7a84",
+      "name": "Append row in sheet1",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2512,
+        -560
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "mc2HZDykmvddgfRH",
+          "name": "Ixina-J-M"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2064,
+        -464
+      ],
+      "id": "1c031b99-62e9-4fa3-b1e7-b71a7f2858c3",
+      "name": "No Operation, do nothing1"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2288,
+        -560
+      ],
+      "id": "450f5fa5-d618-4b40-a064-0a07f602588e",
+      "name": "Merge"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function isValidContremarque(value) {\n  if (typeof value !== 'string') return false;\n\n  const v = value.trim();\n  if (v.length < 3) return false;\n\n  // Reject pure numeric values\n  if (/^\\d+$/.test(v)) return false;\n\n  // Reject long numeric-heavy codes (likely order numbers)\n  const digitCount = (v.match(/\\d/g) || []).length;\n  if (digitCount > 0 && digitCount >= v.length * 0.7) return false;\n\n  return true;\n}\n\n// --------------------\n// MAIN\n// --------------------\n\nreturn {\n  json: {\n    ...$json,\n    contremarque: isValidContremarque($json.contremarque)\n      ? $json.contremarque\n      : null\n  },\n  binary: $binary\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1168,
+        144
+      ],
+      "id": "efe61e65-9afa-4606-a383-d2c6ba261f76",
+      "name": "Sanitize Contremarque"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    ...$json,\n    drive_view_url: `https://drive.google.com/file/d/${$json.id}/view`\n  },\n  binary: $binary\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2064,
+        -656
+      ],
+      "id": "ecef63b2-8c5c-41ad-a84a-2fbf63ba2d60",
+      "name": "recup Link"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function onlyDigits(s) {\n  return typeof s === 'string' && /^\\d+$/.test(s.trim())\n    ? s.trim()\n    : null;\n}\n\nfunction recoverInvoiceNumberFromText(text) {\n  if (typeof text !== 'string') return null;\n\n  // Candidates that look like invoice numbers (7–12 digits)\n  const matches = text.match(/\\b\\d{7,12}\\b/g);\n  if (!matches) return null;\n\n  // Count frequency (invoice number usually appears on every page)\n  const freq = new Map();\n  for (const m of matches) {\n    freq.set(m, (freq.get(m) || 0) + 1);\n  }\n\n  // Pick the most frequent, tie-breaker = longest\n  let best = null;\n  let bestCount = -1;\n  let bestLength = -1;\n\n  for (const [value, count] of freq.entries()) {\n    if (\n      count > bestCount ||\n      (count === bestCount && value.length > bestLength)\n    ) {\n      best = value;\n      bestCount = count;\n      bestLength = value.length;\n    }\n  }\n\n  return best;\n}\n\n// --------------------\n// MAIN\n// --------------------\n\nlet numero = onlyDigits($json.numero_facture);\n\n// If already present and plausible → DO NOT TOUCH\nif (numero && numero.length >= 7) {\n  return {\n    json: { ...$json, numero_facture: numero },\n    binary: $binary\n  };\n}\n\n// Otherwise, attempt recovery from OCR/text\nconst recovered = recoverInvoiceNumberFromText($json.text);\n\nreturn {\n  json: {\n    ...$json,\n    numero_facture: recovered || null\n  },\n  binary: $binary\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        944,
+        144
+      ],
+      "id": "813dc998-211d-4dcc-8283-c00e6d6c66c5",
+      "name": "Sanitize Numero_de_facture"
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.mistral.ai/v1/files",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mistralCloudApi",
+        "sendBody": true,
+        "contentType": "multipart-form-data",
+        "bodyParameters": {
+          "parameters": [
+            {
+              "name": "purpose",
+              "value": "ocr"
+            },
+            {
+              "parameterType": "formBinaryData",
+              "name": "file",
+              "inputDataFieldName": "data"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "14de5a20-212a-4879-bce0-9a0bf5bd700b",
+      "name": "Mistral Upload",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -304,
+        144
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "mistralCloudApi": {
+          "id": "zVoTlkMUwXuSInDp",
+          "name": "Mistral Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "url": "=https://api.mistral.ai/v1/files/{{ $json.id }}/url",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mistralCloudApi",
+        "sendQuery": true,
+        "queryParameters": {
+          "parameters": [
+            {
+              "name": "expiry",
+              "value": "24"
+            }
+          ]
+        },
+        "sendHeaders": true,
+        "headerParameters": {
+          "parameters": [
+            {
+              "name": "Accept",
+              "value": "application/json"
+            }
+          ]
+        },
+        "options": {}
+      },
+      "id": "1a6f6e5c-be64-43e8-9aa7-a06ed1aab19a",
+      "name": "Mistral Signed URL",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        -80,
+        144
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "mistralCloudApi": {
+          "id": "zVoTlkMUwXuSInDp",
+          "name": "Mistral Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "method": "POST",
+        "url": "https://api.mistral.ai/v1/ocr",
+        "authentication": "predefinedCredentialType",
+        "nodeCredentialType": "mistralCloudApi",
+        "sendBody": true,
+        "specifyBody": "json",
+        "jsonBody": "={\n  \"model\": \"mistral-ocr-latest\",\n  \"document\": {\n    \"type\": \"document_url\",\n    \"document_url\": \"{{ $json.url }}\"\n  },\n  \"include_image_base64\": false\n}",
+        "options": {}
+      },
+      "id": "e3929c3f-bec6-408a-b923-edb49b693c4c",
+      "name": "Mistral DOC OCR",
+      "type": "n8n-nodes-base.httpRequest",
+      "position": [
+        144,
+        144
+      ],
+      "typeVersion": 4.2,
+      "credentials": {
+        "mistralCloudApi": {
+          "id": "zVoTlkMUwXuSInDp",
+          "name": "Mistral Cloud account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "promptType": "define",
+        "text": "=You are a STRICT accounting document classifier and supplier invoice data extractor.\nBehave like a professional accountant. Goal: fidelity to the document, no inference.\n\nAnalyze the following filename and PDF content (may include markdown tables).\n\nINPUT FORMAT NOTE (IMPORTANT):\n- The PDF content may include markdown tables (rows with \"|\" separators).\n- When a label appears as a TABLE HEADER, extract ONLY the value from the SAME COLUMN in the SAME ROW.\n- Prefer table extraction over free-text extraction whenever a table exists.\n- Never concatenate values from adjacent columns.\n\nTASK:\n1) Decide if this is a SUPPLIER INVOICE.\n2) If and ONLY if it is, extract the fields below.\n3) If not, explain why.\n\nINVOICE RULES:\n- Must include supplier name, invoice number, invoice date, and a payable amount.\n- Must NOT be: quote/devis, pro forma, credit note/avoir, delivery note, contract/terms, statement, marketing.\n- If ambiguity exists → is_invoice=false.\n\nGENERAL EXTRACTION RULES:\n- Never invent/guess. If not explicit → null.\n- Do not normalize dates or identifiers.\n- Monetary values: number format 1234.56 (no currency symbols).\n\nFIELDS:\nfournisseur: issuer name (not customer).\n\nnumero_facture:\n- Must be labeled as invoice number (facture n°, invoice number, Rechnungsnummer, etc.).\n- A customer number (“No. du client”, customer number) is NEVER an invoice number.\n- If a table contains both “No. de la facture” and “No. du client”, use ONLY “No. de la facture”.\n- If any doubt → null.\n\ndate_facture:\n- Must be explicitly linked to invoice. Keep as-is.\n\ncontremarque:\n- Extract ONLY if explicitly labeled “Contremarque” or “C/M”.\n- If in a table, take ONLY the value under that column. If unsure → null.\n\nreference_client:\n- Extract ONLY if labeled “votre référence / vos références / vos réf. commande / your reference / customer reference”.\n\nnumero_commande_client:\n- Extract ONLY if labeled “N° commande client / commande client / sales order / customer order / Cmd EDI”.\n\nAMOUNTS:\nmontant_ht: only if labeled HT / excl VAT.\nmontant_ttc: only if labeled TTC / incl VAT.\nmontant_du: amount explicitly payable (“net à payer”, “total à payer”, “amount due”).\nIf only one total and no VAT breakdown: set montant_du AND montant_ttc to that total.\n\necheance_paiement:\n- Extract due date if present, else payment terms text as-is. Do not compute.\n\nCONFIDENCE:\n- 0.9–1.0: clear invoice, key fields unambiguous\n- 0.6–0.8: invoice but some missing/uncertain\n- <0.6: weak/uncertain\nIf is_invoice=false → confidence <= 0.4.\n\nOUTPUT: JSON ONLY (no markdown, no fences).\nSchema:\n{\n  \"is_invoice\": boolean,\n  \"confidence\": number,\n  \"fournisseur\": string|null,\n  \"numero_facture\": string|null,\n  \"date_facture\": string|null,\n  \"contremarque\": string|null,\n  \"reference_client\": string|null,\n  \"numero_commande_client\": string|null,\n  \"montant_ht\": number|null,\n  \"montant_ttc\": number|null,\n  \"montant_du\": number|null,\n  \"echeance_paiement\": string|null,\n  \"reason_if_not_invoice\": string|null\n}\n\nINPUT DATA\nINPUT DATA\n{{ $json.pages.map(p => p.markdown).join(\"\\n\\n--- PAGE BREAK ---\\n\\n\") }}",
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.agent",
+      "typeVersion": 3,
+      "position": [
+        368,
+        144
+      ],
+      "id": "15fcfe18-fba2-4ff3-8a26-4c6d24d3752a",
+      "name": "AI Agent1"
+    },
+    {
+      "parameters": {
+        "options": {}
+      },
+      "type": "@n8n/n8n-nodes-langchain.lmChatDeepSeek",
+      "typeVersion": 1,
+      "position": [
+        448,
+        368
+      ],
+      "id": "c8cfea51-09bf-43fb-8743-5c99313cd6f7",
+      "name": "DeepSeek Chat Model1",
+      "credentials": {
+        "deepSeekApi": {
+          "id": "LvXlIyA39tiR8cOC",
+          "name": "DeepSeek account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "pollTimes": {
+          "item": [
+            {
+              "mode": "everyMinute"
+            }
+          ]
+        },
+        "simple": false,
+        "filters": {
+          "labelIds": [
+            "Label_8823808780425048840"
+          ]
+        },
+        "options": {
+          "dataPropertyAttachmentsPrefixName": "attachment_",
+          "downloadAttachments": true
+        }
+      },
+      "type": "n8n-nodes-base.gmailTrigger",
+      "typeVersion": 1.3,
+      "position": [
+        -976,
+        112
+      ],
+      "id": "e6c974fb-8f7d-4e8f-90f8-904b738c3bc0",
+      "name": "Gmail Trigger",
+      "credentials": {
+        "gmailOAuth2": {
+          "id": "4FgqCjr4Asbq6igs",
+          "name": "IXINA-J-M"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -1200,
+        -80
+      ],
+      "id": "e9d92148-5072-4afe-ac27-30b5e0f9c913",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "content": "## Rattrapage \n",
+        "height": 80
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        -1488,
+        -64
+      ],
+      "typeVersion": 1,
+      "id": "7195321b-d6ba-42cc-865b-8564115bfde2",
+      "name": "Sticky Note"
+    },
+    {
+      "parameters": {
+        "binaryData": true,
+        "name": "={{\n(() => {\n  /** ---- DATE ---- **/\n  const rawDate = $json.date_facture || '';\n\n  let yyyy = '0000', mm = '00', dd = '00';\n\n  if (/^\\d{4}-\\d{2}-\\d{2}/.test(rawDate)) {\n    // YYYY-MM-DD\n    [yyyy, mm, dd] = rawDate.split('T')[0].split('-');\n  } else if (/^\\d{2}\\/\\d{2}\\/\\d{4}$/.test(rawDate)) {\n    // DD/MM/YYYY\n    const parts = rawDate.split('/');\n    dd = parts[0];\n    mm = parts[1];\n    yyyy = parts[2];\n  }\n\n  const dateFormatted = `${yyyy}.${mm}.${dd}`;\n\n  /** ---- FOURNISSEUR ---- **/\n  const supplierRaw = $json.fournisseur || 'NO_SUPPLIER';\n  const supplierClean = supplierRaw\n    .normalize('NFD')\n    .replace(/[\\u0300-\\u036f]/g, '') // supprime accents\n    .replace(/[^a-zA-Z]/g, '')\n    .toUpperCase()\n    .slice(0, 8) || 'SUPPLIER';\n\n  /** ---- NUMERO FACTURE ---- **/\n  const invoiceRaw = $json.numero_facture || 'NO_NUM';\n  const invoiceClean = String(invoiceRaw)\n    .replace(/[\\/\\\\?%*:|\"<>]/g, '-')\n    .replace(/\\s+/g, '')\n    .slice(0, 30);\n\n  /** ---- FINAL ---- **/\n  return `${dateFormatted}_${supplierClean}_${invoiceClean}.pdf`\n    .replace(/[\\/\\\\?%*:|\"<>]/g, '-')\n    .trim();\n})()\n}}",
+        "parents": [
+          "1l5AkbGWtImsl_10vLaawXRtb6WzXfaaz"
+        ],
+        "options": {}
+      },
+      "id": "d279082a-37b7-4843-a0dc-5aeee8db6725",
+      "name": "Upload to Factures1",
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 2,
+      "position": [
+        2272,
+        304
+      ],
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "PPGl8Q0UQXzzX18e",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1AouJvxLKFSFgRnZl37IJcJyWEphqkxLfea4OZDqdleY",
+          "mode": "list",
+          "cachedResultName": "Factures_Ixina_Sheets",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1AouJvxLKFSFgRnZl37IJcJyWEphqkxLfea4OZDqdleY/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "Feuille 1",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1AouJvxLKFSFgRnZl37IJcJyWEphqkxLfea4OZDqdleY/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "defineBelow",
+          "value": {
+            "Lien de la facture dans le drive": "={{ $json.drive_view_url }}",
+            "Fournisseur": "={{ $json.fournisseur }}",
+            "Numéro_facture": "={{ $json.numero_facture }}",
+            "Date_facture": "={{ $json.date_facture }}",
+            "Contremarque": "={{ $json.contremarque }}",
+            "Montant_ht": "={{ $json.montant_ht }}",
+            "montant_ttc": "={{ $json.montant_ttc }}",
+            "montant_du": "={{ $json.montant_du }}",
+            "Echeance_paiment": "={{ $json.echeance_paiement }}"
+          },
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "Fournisseur",
+              "displayName": "Fournisseur",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Numéro_facture",
+              "displayName": "Numéro_facture",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Date_facture",
+              "displayName": "Date_facture",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Contremarque",
+              "displayName": "Contremarque",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Montant_ht",
+              "displayName": "Montant_ht",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "montant_ttc",
+              "displayName": "montant_ttc",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "montant_du",
+              "displayName": "montant_du",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Echeance_paiment",
+              "displayName": "Echeance_paiment",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "Lien de la facture dans le drive",
+              "displayName": "Lien de la facture dans le drive",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true
+            },
+            {
+              "id": "is_invoice",
+              "displayName": "is_invoice",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "confidence",
+              "displayName": "confidence",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "fournisseur",
+              "displayName": "fournisseur",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "numero_facture",
+              "displayName": "numero_facture",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "date_facture",
+              "displayName": "date_facture",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "contremarque",
+              "displayName": "contremarque",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "montant_ht",
+              "displayName": "montant_ht",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "echeance_paiement",
+              "displayName": "echeance_paiement",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "reason_if_not_invoice",
+              "displayName": "reason_if_not_invoice",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "numpages",
+              "displayName": "numpages",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "numrender",
+              "displayName": "numrender",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "info",
+              "displayName": "info",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "text",
+              "displayName": "text",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            },
+            {
+              "id": "version",
+              "displayName": "version",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": true
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "id": "ed74606c-1c83-45dd-a6b3-e3762f0d292c",
+      "name": "Append row in sheet",
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2944,
+        400
+      ],
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UnHMupHP8drU2fNa",
+          "name": "Google Sheets account (perso)"
+        }
+      }
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "typeVersion": 1,
+      "position": [
+        2496,
+        496
+      ],
+      "id": "27a7ade8-997c-4a69-aadd-05b1a4de630f",
+      "name": "No Operation, do nothing2"
+    },
+    {
+      "parameters": {
+        "mode": "combine",
+        "combineBy": "combineByPosition",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.merge",
+      "typeVersion": 3.2,
+      "position": [
+        2720,
+        400
+      ],
+      "id": "4f9e0ca5-d467-431d-8dc2-4f27d16860d9",
+      "name": "Merge2"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "return {\n  json: {\n    ...$json,\n    drive_view_url: `https://drive.google.com/file/d/${$json.id}/view`\n  },\n  binary: $binary\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2496,
+        304
+      ],
+      "id": "93ec703e-7c65-4b29-b8fb-1dbcbc32408a",
+      "name": "recup Link1"
+    },
+    {
+      "parameters": {
+        "content": "## File Name 0000.00.00"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1776,
+        -864
+      ],
+      "typeVersion": 1,
+      "id": "2cdc376e-c430-44df-bf72-0e0d3ddc88c3",
+      "name": "Sticky Note1"
+    },
+    {
+      "parameters": {
+        "content": "## Upsert n° Facture"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        2432,
+        -768
+      ],
+      "typeVersion": 1,
+      "id": "0c3e5da2-b131-44c0-a27d-2429aa212dac",
+      "name": "Sticky Note2"
+    },
+    {
+      "parameters": {
+        "content": "## Uniformiser Date"
+      },
+      "type": "n8n-nodes-base.stickyNote",
+      "position": [
+        1264,
+        304
+      ],
+      "typeVersion": 1,
+      "id": "ca29bb4a-4404-44be-a1be-b2311ba2bb55",
+      "name": "Sticky Note3"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "Iterate attachments": {
+      "main": [
+        [
+          {
+            "node": "Is PDF?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is PDF?": {
+      "main": [
+        [
+          {
+            "node": "Read PDF",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Mistral Upload",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Read PDF": {
+      "main": [
+        [
+          {
+            "node": "No Operation, do nothing",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Parse DeepSeek JSON": {
+      "main": [
+        [
+          {
+            "node": "Sanitize Numero_de_facture",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Is invoice?": {
+      "main": [
+        [
+          {
+            "node": "Upload to Factures",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "No Operation, do nothing1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "Upload to Factures1",
+            "type": "main",
+            "index": 0
+          },
+          {
+            "node": "No Operation, do nothing2",
+            "type": "main",
+            "index": 0
+          }
+        ],
+        []
+      ]
+    },
+    "Get many messages": {
+      "main": [
+        [
+          {
+            "node": "Iterate attachments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Merge1": {
+      "main": [
+        [
+          {
+            "node": "Is invoice?",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Operation, do nothing": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Factures": {
+      "main": [
+        [
+          {
+            "node": "recup Link",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Operation, do nothing1": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sanitize Contremarque": {
+      "main": [
+        [
+          {
+            "node": "Merge1",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "recup Link": {
+      "main": [
+        [
+          {
+            "node": "Merge",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Sanitize Numero_de_facture": {
+      "main": [
+        [
+          {
+            "node": "Sanitize Contremarque",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mistral Upload": {
+      "main": [
+        [
+          {
+            "node": "Mistral Signed URL",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mistral Signed URL": {
+      "main": [
+        [
+          {
+            "node": "Mistral DOC OCR",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mistral DOC OCR": {
+      "main": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "DeepSeek Chat Model1": {
+      "ai_languageModel": [
+        [
+          {
+            "node": "AI Agent1",
+            "type": "ai_languageModel",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "AI Agent1": {
+      "main": [
+        [
+          {
+            "node": "Parse DeepSeek JSON",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Gmail Trigger": {
+      "main": [
+        [
+          {
+            "node": "Iterate attachments",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Get many messages",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Upload to Factures1": {
+      "main": [
+        [
+          {
+            "node": "recup Link1",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "No Operation, do nothing2": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 1
+          }
+        ]
+      ]
+    },
+    "Merge2": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "recup Link1": {
+      "main": [
+        [
+          {
+            "node": "Merge2",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": true,
+  "settings": {
+    "executionOrder": "v1",
+    "timezone": "Europe/Paris",
+    "callerPolicy": "workflowsFromSameOwner",
+    "availableInMCP": false,
+    "timeSavedPerExecution": 3
+  },
+  "versionId": "810402e0-53fd-4b23-b498-e2062aff82dc",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "254d84de8a656381919341b3fe6c852cbf8eaab2bfb56c3101abff77d592751e"
+  },
+  "id": "FNtFUKbAABV7KDYF",
+  "tags": [
+    {
+      "updatedAt": "2025-12-03T15:44:40.600Z",
+      "createdAt": "2025-12-03T15:44:40.600Z",
+      "id": "4s4PmPunMOAcTSqL",
+      "name": "Ixina"
+    },
+    {
+      "updatedAt": "2025-12-04T14:18:50.126Z",
+      "createdAt": "2025-12-04T14:18:50.126Z",
+      "id": "UfuZr1gt0lSZJz6W",
+      "name": "Fonctionnel ! 🎉"
+    }
+  ]
+}
