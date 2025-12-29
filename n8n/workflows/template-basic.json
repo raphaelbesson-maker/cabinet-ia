@@ -1,0 +1,7 @@
+{
+  "name": "TEMPLATE - Exemple workflow",
+  "version": 1,
+  "notes": "Modèle de workflow n8n pour le cabinet IA (sans credentials).",
+  "nodes": [],
+  "connections": {}
+}
