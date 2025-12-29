@@ -1,0 +1,575 @@
+{
+  "name": "Cartographie comptes latents - Google Drive - Batch",
+  "nodes": [
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.manualTrigger",
+      "typeVersion": 1,
+      "position": [
+        -48,
+        320
+      ],
+      "id": "d02481cc-5ece-41d2-ad47-f88ea664b6fe",
+      "name": "When clicking ‘Execute workflow’"
+    },
+    {
+      "parameters": {
+        "operation": "download",
+        "fileId": {
+          "__rl": true,
+          "value": "={{$json.id}}",
+          "mode": "id"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        624,
+        240
+      ],
+      "id": "7e4578a4-31ed-402f-9e39-2498ef6fa97b",
+      "name": "Download file",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "PPGl8Q0UQXzzX18e",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "const { simpleParser } = require('mailparser');\n\nconst emailContent = $json.data; // ou $json.text selon ton choix\n\nif (!emailContent || typeof emailContent !== 'string') {\n  throw new Error('No email text found');\n}\n\nconst mail = await simpleParser(emailContent);\n\n// Headers Map → Object\nconst headers = {};\nfor (const [key, value] of mail.headers) {\n  headers[key] = value;\n}\n\nreturn {\n  json: {\n    message_id: mail.messageId || '',\n    date: mail.date ? mail.date.toISOString() : '',\n    subject: mail.subject || '',\n    from: mail.from?.text || '',\n    to: mail.to?.text || '',\n    cc: mail.cc?.text || '',\n    body: mail.text || mail.html || '',\n    headers\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1072,
+        240
+      ],
+      "id": "d1422c90-3de6-4cab-910f-613ad8cce152",
+      "name": "Mail parser"
+    },
+    {
+      "parameters": {
+        "resource": "fileFolder",
+        "searchMethod": "query",
+        "queryString": "mimeType = 'message/rfc822'",
+        "returnAll": true,
+        "filter": {
+          "folderId": {
+            "__rl": true,
+            "value": "1QfM9tWVsy-YrSxpwoWPRW5YH5RcFXmtT",
+            "mode": "list",
+            "cachedResultName": "30 à 40",
+            "cachedResultUrl": "https://drive.google.com/drive/folders/1QfM9tWVsy-YrSxpwoWPRW5YH5RcFXmtT"
+          }
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleDrive",
+      "typeVersion": 3,
+      "position": [
+        176,
+        320
+      ],
+      "id": "e172c42d-6bd7-43e7-aee0-1851adf873aa",
+      "name": "Search files and folders",
+      "credentials": {
+        "googleDriveOAuth2Api": {
+          "id": "PPGl8Q0UQXzzX18e",
+          "name": "Google Drive account"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "operation": "text",
+        "options": {}
+      },
+      "type": "n8n-nodes-base.extractFromFile",
+      "typeVersion": 1.1,
+      "position": [
+        848,
+        240
+      ],
+      "id": "b44bdb50-0899-480c-9d5b-d125cee52538",
+      "name": "Extract from File"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function firstEmailFromText(s = '') {\n  const m = (s || '').match(/[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/);\n  return m ? m[0].toLowerCase() : '';\n}\n\nfunction getDomain(email = '') {\n  const at = email.indexOf('@');\n  return at > -1 ? email.slice(at + 1).toLowerCase() : '';\n}\n\nfunction extractNameFromFromText(fromText = '') {\n  // Cas \"NOM, Prénom\" <email@domain.com>\n  const m = (fromText || '').match(/^\"?(.*?)\"?\\s*<[^>]+>/);\n  if (m && m[1]) return m[1].trim();\n\n  // Cas sans chevrons: NOM Prénom email@domain.com\n  const beforeEmail = (fromText || '').split('<')[0].trim();\n  return beforeEmail || '';\n}\n\nconst fromText = $json.from || '';\nconst toText   = $json.to || '';\nconst ccText   = $json.cc || '';\n\nconst fromEmail  = firstEmailFromText(fromText);\nconst fromDomain = getDomain(fromEmail);\nconst fromName   = extractNameFromFromText(fromText);\n\nreturn {\n  json: {\n    message_id: $json.message_id || $json.messageId || '',\n    date: $json.date || '',\n    subject: $json.subject || '',\n\n    from_text: fromText,\n    from_name: fromName,\n    from_email: fromEmail,\n    from_domain: fromDomain,\n\n    to_text: toText,\n    cc_text: ccText,\n\n    // on passe ce qui t'intéresse vraiment\n    original_message_excerpt: $json.original_message_excerpt || ''\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1520,
+        240
+      ],
+      "id": "7bc7fa09-b683-4b46-b612-1699e52aeecc",
+      "name": "Normalize mail"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function extractOriginalMessage(body = '') {\n  if (!body) return '';\n\n  // patterns classiques de forward\n  const patterns = [\n    /-----Original Message-----/i,\n    /-----Message d'origine-----/i,\n    /From:\\s.+\\nSent:\\s.+\\nTo:\\s.+\\n/i,\n    /De : .+\\nEnvoyé : .+\\nÀ : .+\\n/i\n  ];\n\n  let original = body;\n\n  for (const p of patterns) {\n    const match = body.match(p);\n    if (match) {\n      original = body.slice(match.index);\n      break;\n    }\n  }\n\n  // nettoyage HTML / bruit\n  const clean = original\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  return clean.slice(0, 500);\n}\n\nreturn {\n  json: {\n    message_id: $json.message_id,\n    date: $json.date,\n    subject: $json.subject,\n    from: $json.from,\n    to: $json.to,\n    cc: $json.cc,\n\n    // 🔥 champ clé\n    original_message_excerpt: extractOriginalMessage($json.body),\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1296,
+        240
+      ],
+      "id": "5a829972-1432-4209-8567-a30f75a119c3",
+      "name": "Drop binaries"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function extractEmails(text = '') {\n  const regex = /[a-zA-Z0-9._%+-]+@[a-zA-Z0-9.-]+\\.[a-zA-Z]{2,}/g;\n  return text.match(regex) || [];\n}\n\nfunction getDomain(email) {\n  return email.split('@')[1].toLowerCase();\n}\n\n// =====================\n// CONFIG MÉTIER\n// =====================\nconst SFE_DOMAINS = ['sfefrance.com', 'emballage-sfe.com'];\nconst TRANSIT_DOMAINS = [\n  'dbschenker.com',\n  'dhl.com',\n  'kuehne-nagel.com',\n  'cevalogistics.com',\n  'ceva-logistics.com'\n];\n\n// =====================\n// INPUT NORMALISÉ\n// =====================\nconst fromText = $json.from_text ?? '';\nconst toText = $json.to_text ?? '';\nconst ccText = $json.cc_text ?? '';\nconst scanText = $json.text_for_scan ?? '';\n\n// =====================\n// 1️⃣ EXTRACTION EMAILS\n// =====================\nconst fromEmails = extractEmails(fromText).map(e => e.toLowerCase());\n\nconst otherEmails = [\n  ...extractEmails(toText),\n  ...extractEmails(ccText),\n  ...extractEmails(scanText),\n]\n.map(e => e.toLowerCase())\n.filter(e => !fromEmails.includes(e)); // éviter doublons FROM\n\n// =====================\n// 2️⃣ STRUCTURATION email → domaine\n// =====================\nfunction qualifyEmails(emails) {\n  return emails.map(email => {\n    const domain = getDomain(email);\n    return {\n      email,\n      domain,\n      isSfe: SFE_DOMAINS.includes(domain),\n      isTransit: TRANSIT_DOMAINS.includes(domain),\n      isInteresting: !SFE_DOMAINS.includes(domain) && !TRANSIT_DOMAINS.includes(domain),\n    };\n  });\n}\n\nconst fromQualified = qualifyEmails(fromEmails);\nconst otherQualified = qualifyEmails(otherEmails);\n\n// =====================\n// 3️⃣ LOGIQUE MÉTIER\n// =====================\n\n// FROM intéressant = signal fort\nconst interestingFrom = fromQualified.filter(e => e.isInteresting);\n\n// Autres domaines intéressants (CC / TO)\nconst interestingOthers = otherQualified.filter(e => e.isInteresting);\n\n// Agrégation finale\nconst interestingEmails = [\n  ...interestingFrom,\n  ...interestingOthers,\n];\n\nconst interestingDomains = [\n  ...new Set(interestingEmails.map(e => e.domain)),\n];\n\n// Flag global\nconst interesting = interestingEmails.length > 0;\n\n// =====================\n// 4️⃣ RETURN COMPLET\n// =====================\nreturn {\n  json: {\n    // --- identité mail ---\n    message_id: $json.message_id || '',\n    date: $json.date || '',\n    subject: $json.subject || '',\n\n    from_text: fromText,\n    from_email: $json.from_email || '',\n    from_domain: $json.from_domain || '',\n\n    to_text: toText,\n    cc_text: ccText,\n    \n    original_message_excerpt: $json.original_message_excerpt,\n\n    // --- résultats métier ---\n    interesting: interesting,\n\n    interesting_domains: interestingDomains,\n    interesting_emails: interestingEmails.map(e => e.email),\n\n    // --- debug utile ---\n    _debug: {\n      fromQualified,\n      otherQualified,\n    }\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        1744,
+        240
+      ],
+      "id": "a161f8ce-c926-4586-a8fd-1b6846e6d973",
+      "name": "extract and filter"
+    },
+    {
+      "parameters": {
+        "operation": "append",
+        "documentId": {
+          "__rl": true,
+          "value": "1kSgWXCrYQh6mixsgq5E4TTOsLR7YtaFIrdo5W2pYhoM",
+          "mode": "list",
+          "cachedResultName": "Archives mail SFE",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1kSgWXCrYQh6mixsgq5E4TTOsLR7YtaFIrdo5W2pYhoM/edit?usp=drivesdk"
+        },
+        "sheetName": {
+          "__rl": true,
+          "value": "gid=0",
+          "mode": "list",
+          "cachedResultName": "2025",
+          "cachedResultUrl": "https://docs.google.com/spreadsheets/d/1kSgWXCrYQh6mixsgq5E4TTOsLR7YtaFIrdo5W2pYhoM/edit#gid=0"
+        },
+        "columns": {
+          "mappingMode": "autoMapInputData",
+          "value": {},
+          "matchingColumns": [],
+          "schema": [
+            {
+              "id": "date",
+              "displayName": "date",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "subject",
+              "displayName": "subject",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "from_name",
+              "displayName": "from_name",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "from_email",
+              "displayName": "from_email",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "from_domain",
+              "displayName": "from_domain",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "interesting_domains",
+              "displayName": "interesting_domains",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "interesting_emails",
+              "displayName": "interesting_emails",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "message_id",
+              "displayName": "message_id",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "Expéditeur dans le CRM",
+              "displayName": "Expéditeur dans le CRM",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "nom de domaine dans le CRM ?",
+              "displayName": "nom de domaine dans le CRM ?",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "original_message_excerpt ",
+              "displayName": "original_message_excerpt ",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            },
+            {
+              "id": "original_message_excerpt",
+              "displayName": "original_message_excerpt",
+              "required": false,
+              "defaultMatch": false,
+              "display": true,
+              "type": "string",
+              "canBeUsedToMatch": true,
+              "removed": false
+            }
+          ],
+          "attemptToConvertTypes": false,
+          "convertFieldsToString": false
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.googleSheets",
+      "typeVersion": 4.7,
+      "position": [
+        2416,
+        240
+      ],
+      "id": "32b1b424-67a5-4729-a8e1-8a2986ec26dd",
+      "name": "Append row in sheet",
+      "credentials": {
+        "googleSheetsOAuth2Api": {
+          "id": "UnHMupHP8drU2fNa",
+          "name": "Google Sheets account (perso)"
+        }
+      }
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "// ----------------------------------------------------\n// PREPARE SHEETS\n// Rôle :\n// - ne fait AUCUNE requalification\n// - formate uniquement les données\n// - prépare une ligne Google Sheets propre\n// ----------------------------------------------------\n\n// 1. Filtrage amont : si pas intéressant → on skip\nif (!$json.interesting) {\n  return {\n    json: {\n      _skip: true\n    }\n  };\n}\n\n// 2. Récupération SÛRE des tableaux\nconst interestingEmails = Array.isArray($json.interesting_emails)\n  ? $json.interesting_emails\n  : [];\n\nconst interestingDomains = Array.isArray($json.interesting_domains)\n  ? $json.interesting_domains\n  : [];\n\n// 3. Standardisation de la date (ISO → Google Sheets OK)\nlet dateIso = '';\nif ($json.date) {\n  try {\n    dateIso = new Date($json.date).toISOString();\n  } catch (e) {\n    dateIso = '';\n  }\n}\n\n// 4. Extraction du nom depuis from_text si absent\nlet fromName = $json.from_name || '';\n\nif (!fromName && $json.from_text) {\n  const match = $json.from_text.match(/^\"?([^\"<]+)\"?\\s*</);\n  if (match) {\n    fromName = match[1].trim();\n  }\n}\n\n// 5. Construction de la ligne Google Sheets\nreturn {\n  json: {\n    date: dateIso,\n    subject: $json.subject || '',\n\n    from_name: fromName,\n    from_email: $json.from_email || '',\n    from_domain: $json.from_domain || '',\n    \n    original_message_excerpt: $json.original_message_excerpt || '',\n\n    interesting_domains: interestingDomains.join(', '),\n    interesting_emails: interestingEmails.join(', '),\n\n    // trace technique utile\n    message_id: $json.message_id || ''\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        2192,
+        240
+      ],
+      "id": "59d338d9-e18a-4e08-83c6-270a0a625743",
+      "name": "Prepare sheets"
+    },
+    {
+      "parameters": {
+        "conditions": {
+          "options": {
+            "caseSensitive": true,
+            "leftValue": "",
+            "typeValidation": "strict",
+            "version": 2
+          },
+          "conditions": [
+            {
+              "id": "a47543ee-d2d4-40fe-85e6-001e025ba073",
+              "leftValue": "={{ $json.interesting }}",
+              "rightValue": true,
+              "operator": {
+                "type": "boolean",
+                "operation": "equals"
+              }
+            }
+          ],
+          "combinator": "and"
+        },
+        "options": {}
+      },
+      "type": "n8n-nodes-base.if",
+      "typeVersion": 2.2,
+      "position": [
+        1968,
+        240
+      ],
+      "id": "ea67b9fb-c1be-47b7-9d4e-7dd6254d5b29",
+      "name": "If"
+    },
+    {
+      "parameters": {
+        "batchSize": 5,
+        "options": {
+          "reset": false
+        }
+      },
+      "type": "n8n-nodes-base.splitInBatches",
+      "typeVersion": 3,
+      "position": [
+        400,
+        320
+      ],
+      "id": "6f6c22ea-5f5d-4160-846a-9a9e496104b4",
+      "name": "Loop Over Items"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.noOp",
+      "name": "Replace Me",
+      "typeVersion": 1,
+      "position": [
+        2640,
+        240
+      ],
+      "id": "aee875e3-a9c8-44b2-9070-7861012fbf29"
+    },
+    {
+      "parameters": {
+        "mode": "runOnceForEachItem",
+        "jsCode": "function cleanBody(html = '') {\n  // enlever les tags HTML\n  const text = html\n    .replace(/<style[\\s\\S]*?<\\/style>/gi, '')\n    .replace(/<script[\\s\\S]*?<\\/script>/gi, '')\n    .replace(/<[^>]+>/g, ' ')\n    .replace(/\\s+/g, ' ')\n    .trim();\n\n  return text.slice(0, 500); // MAX 500 caractères\n}\n\nreturn {\n  json: {\n    message_id: $json.message_id,\n    date: $json.date,\n    subject: $json.subject,\n    from: $json.from,\n    to: $json.to,\n    cc: $json.cc,\n    body_excerpt: cleanBody($json.body),\n  }\n};"
+      },
+      "type": "n8n-nodes-base.code",
+      "typeVersion": 2,
+      "position": [
+        -48,
+        16
+      ],
+      "id": "c56b40de-8ffd-40e5-a24b-44c2c9f1119b",
+      "name": "Drop binaries1"
+    },
+    {
+      "parameters": {},
+      "type": "n8n-nodes-base.wait",
+      "typeVersion": 1.1,
+      "position": [
+        2864,
+        320
+      ],
+      "id": "4ce44c3a-7c6d-494f-a810-99ad620d8787",
+      "name": "Wait",
+      "webhookId": "10e67c56-93ed-426b-a608-542551a5b8d3"
+    }
+  ],
+  "pinData": {},
+  "connections": {
+    "When clicking ‘Execute workflow’": {
+      "main": [
+        [
+          {
+            "node": "Search files and folders",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Download file": {
+      "main": [
+        [
+          {
+            "node": "Extract from File",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Mail parser": {
+      "main": [
+        [
+          {
+            "node": "Drop binaries",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Search files and folders": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Extract from File": {
+      "main": [
+        [
+          {
+            "node": "Mail parser",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Normalize mail": {
+      "main": [
+        [
+          {
+            "node": "extract and filter",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Drop binaries": {
+      "main": [
+        [
+          {
+            "node": "Normalize mail",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "extract and filter": {
+      "main": [
+        [
+          {
+            "node": "If",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Prepare sheets": {
+      "main": [
+        [
+          {
+            "node": "Append row in sheet",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "If": {
+      "main": [
+        [
+          {
+            "node": "Prepare sheets",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Loop Over Items": {
+      "main": [
+        [],
+        [
+          {
+            "node": "Download file",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Replace Me": {
+      "main": [
+        [
+          {
+            "node": "Wait",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Append row in sheet": {
+      "main": [
+        [
+          {
+            "node": "Replace Me",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    },
+    "Wait": {
+      "main": [
+        [
+          {
+            "node": "Loop Over Items",
+            "type": "main",
+            "index": 0
+          }
+        ]
+      ]
+    }
+  },
+  "active": false,
+  "settings": {
+    "executionOrder": "v1"
+  },
+  "versionId": "c6a4685a-46ff-48d6-a6e6-3ace5f278239",
+  "meta": {
+    "templateCredsSetupCompleted": true,
+    "instanceId": "254d84de8a656381919341b3fe6c852cbf8eaab2bfb56c3101abff77d592751e"
+  },
+  "id": "c17t1uxoTZhk6kc3",
+  "tags": []
+}
